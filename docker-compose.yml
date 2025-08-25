@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_USER: temporal
+      POSTGRES_DB: temporal
+    ports:
+      - "5433:5432"
+    volumes:
+      - temporal_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  temporal:
+    image: temporalio/auto-setup:1.22.0
+    ports:
+      - "7234:7233"
+      - "8234:8233"
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  temporal-ui:
+    image: temporalio/ui:2.21.3
+    ports:
+      - "8080:8080"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    depends_on:
+      temporal:
+        condition: service_healthy
+
+  worker:
+    build: .
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - LLM_MOCK=true
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      - .:/app
+    working_dir: /app
+
+volumes:
+  temporal_postgres_data:
